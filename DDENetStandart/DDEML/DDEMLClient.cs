@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -13,7 +14,7 @@ namespace DDENetStandart.DDEML
         private readonly DDEML.DdeCallback _callback;
         private List<Action> ddemlDelegats;
         private Thread msgThread;
-
+        
         public DDEMLClient(string service, string topic)
         {
             _callback = Callback;
@@ -22,18 +23,22 @@ namespace DDENetStandart.DDEML
             msgThread.SetApartmentState(ApartmentState.STA);
             msgThread.IsBackground = true;
 
-            var res = DDEML.DdeInitialize(ref _idInst, _callback, DDEML.APPCMD_CLIENTONLY, 0);
-            if (res != DDEML.DMLERR_NO_ERROR)
+            AddToMainLoop(() =>
             {
-                throw new Exception($"Unable register with DDEML. Error: {res}");
-            }
+                var res = DDEML.DdeInitialize(ref _idInst, _callback, DDEML.APPCMD_CLIENTONLY, 0);
+                if (res != DDEML.DMLERR_NO_ERROR)
+                {
+                    throw new Exception($"Unable register with DDEML. Error: {res}");
+                }
 
-            var hszService = DDEML.DdeCreateStringHandle(_idInst, service, DDEML.CP_WINUNICODE);
-            var hszTopic = DDEML.DdeCreateStringHandle(_idInst, topic, DDEML.CP_WINUNICODE);
-            _hConv = DDEML.DdeConnect(_idInst, hszService, hszTopic, IntPtr.Zero);
+                var hszService = DDEML.DdeCreateStringHandle(_idInst, service, DDEML.CP_WINUNICODE);
+                var hszTopic = DDEML.DdeCreateStringHandle(_idInst, topic, DDEML.CP_WINUNICODE);
+                _hConv = DDEML.DdeConnect(_idInst, hszService, hszTopic, IntPtr.Zero);
 
-            DDEML.DdeFreeStringHandle(_idInst, hszService);
-            DDEML.DdeFreeStringHandle(_idInst, hszService);
+                DDEML.DdeFreeStringHandle(_idInst, hszService);
+                DDEML.DdeFreeStringHandle(_idInst, hszService);
+            });
+            
 
             if (_hConv == IntPtr.Zero)
             {
@@ -45,11 +50,11 @@ namespace DDENetStandart.DDEML
         {
             if (_hConv != IntPtr.Zero)
             {
-                DDEML.DdeDisconnect(_hConv);
+                AddToMainLoop(() => { DDEML.DdeDisconnect(_hConv); });
             }
             if (_idInst != 0)
             {
-                DDEML.DdeUninitialize(_idInst);
+                AddToMainLoop(() => { DDEML.DdeUninitialize(_idInst); });
             }
         }
 
@@ -79,9 +84,74 @@ namespace DDENetStandart.DDEML
             Console.WriteLine(data);
         }
 
-        static private void MainLoop()
+        #region MainLoop
+        struct MSG
         {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
+
+        struct POINT
+        {
+            public int X;
+            public int Y;
+
+            public POINT(int X, int Y)
+            {
+                this.X = X;
+                this.Y = Y;
+            }
+        }
+
+        [DllImport("user32.dll", EntryPoint = "PeekMessageA", CharSet = CharSet.Ansi)]
+        private static extern bool PeekMessage(ref MSG lpmsg, IntPtr hwnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DispatchMessage(ref MSG msg);
+        [DllImport("user32.dll")]
+        private static extern IntPtr TranslateMessage(ref MSG msg);
+
+        private const int PM_REMOVE = 0x0001;
+
+        private void AddToMainLoop(Action action)
+        {
+            lock (ddemlDelegats)
+            {
+                ddemlDelegats.Add(action);
+            }
+        }
+
+        private void MainLoop()
+        {
+            //Выполняем все, что накидали в очередь
+            lock (ddemlDelegats)
+            {
+                if (ddemlDelegats.Count > 0)
+                {
+                    foreach (var del in ddemlDelegats)
+                    {
+                        del.Invoke();
+                    }
+                    ddemlDelegats.Clear();
+                }
+            }
+            //Обрабатываем сообщения, которые получили из системы
+            MSG msg = new MSG();
+            while(PeekMessage(ref msg, IntPtr.Zero, 0, 0, PM_REMOVE) == true)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+            Console.WriteLine("Main loop ended, repeating...");
+
 
         }
+        #endregion
+
+
     }
 }
