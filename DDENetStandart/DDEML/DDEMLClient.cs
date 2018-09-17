@@ -11,6 +11,7 @@ namespace DDENetStandart.DDEML
     {
         int _idInst = 0;
         IntPtr _hConv;
+        object _hConvLock = new object();
         private readonly DDEML.DdeCallback _callback;
         private List<Action> ddemlDelegats;
         private Thread msgThread;
@@ -22,6 +23,7 @@ namespace DDENetStandart.DDEML
             msgThread = new Thread(MainLoop);
             msgThread.SetApartmentState(ApartmentState.STA);
             msgThread.IsBackground = true;
+            msgThread.Start();
 
             AddToMainLoop(() =>
             {
@@ -31,9 +33,12 @@ namespace DDENetStandart.DDEML
                     throw new Exception($"Unable register with DDEML. Error: {res}");
                 }
 
+                Console.WriteLine("Starting connection");
+
                 var hszService = DDEML.DdeCreateStringHandle(_idInst, service, DDEML.CP_WINUNICODE);
                 var hszTopic = DDEML.DdeCreateStringHandle(_idInst, topic, DDEML.CP_WINUNICODE);
-                _hConv = DDEML.DdeConnect(_idInst, hszService, hszTopic, IntPtr.Zero);
+                lock(_hConvLock)
+                    _hConv = DDEML.DdeConnect(_idInst, hszService, hszTopic, IntPtr.Zero);
 
                 DDEML.DdeFreeStringHandle(_idInst, hszService);
                 DDEML.DdeFreeStringHandle(_idInst, hszService);
