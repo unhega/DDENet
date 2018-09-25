@@ -7,9 +7,10 @@ namespace DDENetStandart
 {
     class Program
     {
+        
         static void Main(string[] args)
         {
-            var client = new DDEMLClient("TESTDDE", "mytopic");
+            Console.Read();
         }
     }
 }
